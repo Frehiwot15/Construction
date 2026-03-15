@@ -1,14 +1,13 @@
-Setting Up the Environment
-to set up a virtual environment (.venv), here are the exact commands you would need to run to get my code working.
+# 🏗️ Construction Scheduling Risk Analytics
 
-Step 1: Create the Virtual Environment
-Bash
-python -m venv .venv
-Step 2: Activate it
-Windows: .venv\Scripts\activate
+This project uses a **Monte Carlo Simulation** to predict construction project delays and identify critical risk phases.
 
-Mac/Linux: source .venv/bin/activate
+## 🚀 How to Run
+1. **Clone the repo:**
+   `git clone https://github.com/Frehiwot15/Construction.git`
 
-Step 3: Install the Libraries
-Bash
-pip install -r requirements.txt
+2. **Setup Environment:**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Or .venv\Scripts\activate on Windows
+   pip install -r requirements.txt
