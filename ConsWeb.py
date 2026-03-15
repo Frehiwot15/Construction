@@ -1,11 +1,90 @@
+import io
 import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.express as px
 st.set_page_config(page_title="Advanced Construction Risk", layout="wide")
 
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700;800&display=swap');
+
+body {font-family: 'Quicksand', sans-serif;}
+
+.box {
+  width: 140px;
+  height: auto;
+  float: left;
+  transition: .5s linear;
+  position: relative;
+  display: block;
+  overflow: hidden;
+  padding: 15px;
+  text-align: center;
+  margin: 0 5px;
+  background: transparent;
+  text-transform: uppercase;
+  font-weight: 900;
+}
+
+.box:before {
+  position: absolute;
+  content: '';
+  left: 0;
+  bottom: 0;
+  height: 4px;
+  width: 100%;
+  border-bottom: 4px solid transparent;
+  border-left: 4px solid transparent;
+  box-sizing: border-box;
+  transform: translateX(100%);
+}
+
+.box:after {
+  position: absolute;
+  content: '';
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  border-top: 4px solid transparent;
+  border-right: 4px solid transparent;
+  box-sizing: border-box;
+  transform: translateX(-100%);
+}
+
+.box:hover {
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+}
+
+.box:hover:before {
+  border-color: #262626;
+  height: 100%;
+  transform: translateX(0);
+  transition: .3s transform linear, .3s height linear .3s;
+}
+
+.box:hover:after {
+  border-color: #262626;
+  height: 100%;
+  transform: translateX(0);
+  transition: .3s transform linear, .3s height linear .5s;
+}
+
+button {
+  color: black;
+  text-decoration: none;
+  cursor: pointer;
+  outline: none;
+  border: none;
+  background: transparent;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🏗️ Advanced Construction Scheduling Risk Analytics ")
-st.write("NRAS Simulation with Risk Contribution & Critical Activity Detection")
+st.write("Monte Carlo Simulation with Risk Contribution & Critical Activity Detection")
 
 # -----------------------------
 # USER INPUT PANEL
@@ -64,8 +143,11 @@ def run_simulation():
 # -----------------------------
 # RUN BUTTON
 # -----------------------------
-if st.button("Run Advanced Simulation"):
+run_col1, run_col2, run_col3 = st.columns(3)
+with run_col2:
+    run_clicked = st.button("Simulate Risk")
 
+if run_clicked:
     results, contribution = run_simulation()
 
     # -----------------------------
@@ -86,6 +168,12 @@ if st.button("Run Advanced Simulation"):
     col3.metric("P80 Confidence", f"{p80:.1f}")
     col4.metric("P90 Confidence", f"{p90:.1f}")
     col5.metric("Delay Probability", f"{delay_prob*100:.1f}%")
+
+    st.session_state.last_avg = avg
+    st.session_state.last_p50 = p50
+    st.session_state.last_p80 = p80
+    st.session_state.last_p90 = p90
+    st.session_state.last_results = results
 
     # -----------------------------
     # COMPLETION DISTRIBUTION
@@ -122,41 +210,86 @@ if st.button("Run Advanced Simulation"):
         phase: np.std(contribution[phase])
         for phase in contribution
     }
+    mean_phase = {
+        phase: np.mean(contribution[phase])
+        for phase in contribution
+    }
+    cv = {
+        phase: (std_dev[phase] / mean_phase[phase]) if mean_phase[phase] != 0 else 0
+        for phase in contribution
+    }
 
     std_df = pd.DataFrame(
-        list(std_dev.items()),
-        columns=["Phase", "Risk Variability"]
-    ).sort_values("Risk Variability", ascending=True)
+        [
+            {
+                "Phase": phase,
+                "Risk Variability": std_dev[phase],
+                "Average Duration": mean_phase[phase],
+                "CV (Std/Mean)": cv[phase],
+            }
+            for phase in contribution
+        ]
+    ).sort_values("CV (Std/Mean)", ascending=False)
 
     st.dataframe(std_df)
 
-    st.info(f"⚠️ Most Risk Sensitive Phase: {std_df.iloc[0]['Phase']}")
+    most_sensitive_phase = std_df.iloc[0]["Phase"]
+    st.info(f"⚠️ Most Risk Sensitive Phase: {most_sensitive_phase}")
+    st.session_state.last_avg = avg
+    st.session_state.last_results = results
 
-    # -----------------------------
-    # MULTI PROJECT COMPARISON (SCENARIO STORAGE)
-    # -----------------------------
-    st.subheader("Scenario Storage")
+# -----------------------------
+# MULTI PROJECT COMPARISON (SCENARIO STORAGE)
+# -----------------------------
+st.subheader("Scenario Comparison & Storage")
 
-    scenario_name = st.text_input("Save Scenario Name")
+scenario_name = st.text_input("Save Scenario Name", key="scenario_name")
 
-    if "scenarios" not in st.session_state:
-        st.session_state.scenarios = {}
+if "scenarios" not in st.session_state:
+    st.session_state.scenarios = {}
 
-    if st.button("Save Scenario"):
-        st.session_state.scenarios[scenario_name] = avg
-        st.success("Scenario Saved")
+save_col, show_col = st.columns(2)
+with save_col:
+    save_clicked = st.button("Save Scenario")
+with show_col:
+    show_scenarios = st.button("Show Scenarios")
 
-    if st.session_state.scenarios:
-        scenario_df = pd.DataFrame(
-            st.session_state.scenarios.items(),
-            columns=["Scenario", "Expected Duration"]
-        )
-        st.bar_chart(scenario_df.set_index("Scenario"))
+if save_clicked:
+    clean_name = scenario_name.strip()
+    if not clean_name:
+        st.error("Enter a scenario name before saving.")
+    elif "last_avg" not in st.session_state:
+        st.error("Run simulation first before saving a scenario.")
+    else:
+        st.session_state.scenarios[clean_name] = st.session_state.last_avg
+        st.success(f"Scenario '{clean_name}' Saved")
 
-    # -----------------------------
-    # EXPORT DATA
-    # -----------------------------
-    df = pd.DataFrame(results, columns=["Completion Time"])
+if show_scenarios and st.session_state.scenarios:
+    scenario_df = pd.DataFrame(
+        list(st.session_state.scenarios.items()),
+        columns=["Scenario", "Expected Duration"]
+    )
+    st.dataframe(scenario_df)
+    st.bar_chart(scenario_df.set_index("Scenario"))
+
+    # Download comparison as Excel
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+        scenario_df.to_excel(writer, index=False, sheet_name="Scenarios")
+        summary_df = pd.DataFrame({
+            "Metric": ["Last Expected Duration", "P50", "P80", "P90"],
+            "Value": [
+                st.session_state.get("last_avg", "N/A"),
+                st.session_state.get("last_p50", "N/A"),
+                st.session_state.get("last_p80", "N/A"),
+                st.session_state.get("last_p90", "N/A")
+            ]
+        })
+        summary_df.to_excel(writer, index=False, sheet_name="Summary")
+    excel_buffer.seek(0)
+    st.download_button("Export Scenario Comparison", excel_buffer, "scenario_comparison.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+if "last_results" in st.session_state:
+    df = pd.DataFrame(st.session_state.last_results, columns=["Completion Time"])
     csv = df.to_csv(index=False).encode()
-
-    st.download_button("Download Simulation Data", csv, "risk_results.csv", "text/csv")
+    st.download_button("Export Simulation Data", csv, "risk_results.csv", "text/csv")
